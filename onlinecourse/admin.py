@@ -1,8 +1,26 @@
 from django.contrib import admin
-# <HINT> Import any new Models here
 from .models import Course, Lesson, Instructor, Learner
+from django.contrib import admin
+from .models import Question, Choice
+
+# Register your models here.
 
 # <HINT> Register QuestionInline and ChoiceInline classes here
+class ChoiceInline(admin.TabularInline):   # or admin.StackedInline
+    model = Choice
+    extra = 3   # This will show 3 empty Choice fields by default
+
+class QuestionAdmin(admin.ModelAdmin):
+    fieldsets = [
+        (None,               {'fields': ['text', 'course', 'grade_point']}),
+    ]
+    inlines = [ChoiceInline]
+
+# Now, unregister and re-register the Question model to attach the new admin configuration
+if admin.site.is_registered(Question):
+    admin.site.unregister(Question)
+
+admin.site.register(Question, QuestionAdmin)
 
 
 class LessonInline(admin.StackedInline):
