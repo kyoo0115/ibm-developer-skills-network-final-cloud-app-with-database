@@ -1,16 +1,19 @@
 from django.shortcuts import render
 from django.http import HttpResponseRedirect
 # <HINT> Import any new Models here
+from django.urls import reverse_lazy
 from .models import Course, Enrollment
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404, render, redirect
 from django.urls import reverse
 from django.views import generic
 from django.contrib.auth import login, logout, authenticate
+from .models import Course, Enrollment, Question, Choice, Submission
 import logging
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
 # Create your views here.
+
 
 
 def registration_request(request):
@@ -64,7 +67,7 @@ def check_if_enrolled(user, course):
     is_enrolled = False
     if user.id is not None:
         # Check if user enrolled
-        num_results = Enrollment.objects.filter(user=user, course=course).count()
+        num_results = Enrollment.objects.filter(user=user, course=course).count() # pylint: disable=no-member
         if num_results > 0:
             is_enrolled = True
     return is_enrolled
@@ -77,7 +80,7 @@ class CourseListView(generic.ListView):
 
     def get_queryset(self):
         user = self.request.user
-        courses = Course.objects.order_by('-total_enrollment')[:10]
+        courses = Course.objects.order_by('-total_enrollment')[:10] # pylint: disable=no-member
         for course in courses:
             if user.is_authenticated:
                 course.is_enrolled = check_if_enrolled(user, course)
@@ -96,13 +99,66 @@ def enroll(request, course_id):
     is_enrolled = check_if_enrolled(user, course)
     if not is_enrolled and user.is_authenticated:
         # Create an enrollment
-        Enrollment.objects.create(user=user, course=course, mode='honor')
+        Enrollment.objects.create(user=user, course=course, mode='honor') # pylint: disable=no-member
         course.total_enrollment += 1
         course.save()
 
     return HttpResponseRedirect(reverse(viewname='onlinecourse:course_details', args=(course.id,)))
 
 
+def extract_answers(request):
+    submitted_anwsers = []
+    for key in request.POST:
+        if key.startswith('choice'):
+            value = request.POST[key]
+            choice_id = int(value)
+            submitted_anwsers.append(choice_id)
+    return submitted_anwsers
+
+def submit(request, course_id):
+    user = request.user
+    course = get_object_or_404(Course, pk=course_id)
+    
+    # Get the associated enrollment object created when the user enrolled the course
+    enrollment = Enrollment.objects.get(user=user, course=course) # pylint: disable=no-member
+    
+    # Create a submission object referring to the enrollment
+    submission = Submission.objects.create(enrollment=enrollment) # pylint: disable=no-member
+
+    # Collect the selected choices from exam form
+    submitted_answers = extract_answers(request)
+    
+    # Add each selected choice object to the submission object
+    for choice_id in submitted_answers:
+        choice = Choice.objects.get(id=choice_id) # pylint: disable=no-member
+        submission.choices_selected.add(choice)
+    
+    submission.save()
+    
+    # Redirect to show_exam_result with the submission id
+    return HttpResponseRedirect(reverse_lazy('onlinecourse:show_exam_result', args=[course_id, submission.id]))
+
+def show_exam_result(request, course_id, submission_id):
+    # Get the course and submission objects based on their ids
+    course = get_object_or_404(Course, pk=course_id)
+    submission = get_object_or_404(Submission, pk=submission_id)
+
+    # Get the selected choice ids from the submission
+    selected_ids = [choice.id for choice in submission.choices.all()]
+
+    # Check each selected choice, if it is correct or not and calculate total score
+    total_score = 0
+    for question in course.question_set.all():
+        if question.is_get_score(selected_ids):
+            total_score += question.grade
+
+    context = {
+        'course': course,
+        'selected_ids': selected_ids,
+        'grade': total_score,
+    }
+
+    return render(request, 'onlinecourse/exam_result_bootstrap.html', context)
 # <HINT> Create a submit view to create an exam submission record for a course enrollment,
 # you may implement it based on following logic:
          # Get user and course object, then get the associated enrollment object created when the user enrolled the course
